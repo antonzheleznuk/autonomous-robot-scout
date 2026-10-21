@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<!--
+  imu.xacro — IMU (аналог BNO055 / MPU-9250)
+  
+  Расположение: центр корпуса (для минимизации ошибок от вибраций).
+  Измеряет: угловая скорость, линейное ускорение, ориентация.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Параметры IMU -->
+  <xacro:property name="imu_size" value="0.02"/>    <!-- Размер кубика IMU, м (2 см) -->
+  <xacro:property name="imu_mass" value="0.01"/>    <!-- Масса IMU, кг (10 г) -->
+
+  <!-- ============================================================ -->
+  <!-- СОЧЛЕНЕНИЕ: крепление IMU к корпусу                           -->
+  <!-- ============================================================ -->
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <!-- IMU в центре корпуса, на верхней грани -->
+    <origin xyz="0 0 ${chassis_height / 2 + 0.01}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============================================================ -->
+  <!-- ЗВЕНО: корпус IMU                                             -->
+  <!-- ============================================================ -->
+  <link name="imu_link">
+    <visual>
+      <geometry>
+        <box size="${imu_size} ${imu_size} ${imu_size}"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0.1 0.8 0.1 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="${imu_size} ${imu_size} ${imu_size}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="${imu_mass}"/>
+      <inertia
+        ixx="${imu_mass * imu_size * imu_size / 6}"
+        ixy="0" ixz="0"
+        iyy="${imu_mass * imu_size * imu_size / 6}"
+        iyz="0"
+        izz="${imu_mass * imu_size * imu_size / 6}"/>
+    </inertial>
+  </link>
+
+  <!-- ============================================================ -->
+  <!-- ПЛАГИН GAZEBO: IMU                                            -->
+  <!-- Публикует данные инерциального датчика.                        -->
+  <!-- ============================================================ -->
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <update_rate>100</update_rate>
+      <!-- 100 Гц — стандарт для IMU. Выше, чем LiDAR и камера,
+           потому что IMU должен отслеживать быстрые движения -->
+
+      <!-- Frame_id сообщений IMU без префикса имени модели -->
+      <gz_frame_id>imu_link</gz_frame_id>
+
+      <visualize>false</visualize>
+      <!-- IMU нечего визуализировать — нет лучей или изображений -->
+
+      <topic>imu</topic>
+
+      <imu>
+        <!-- Шум гироскопа (угловая скорость) -->
+        <angular_velocity>
+          <x>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.001</stddev>
+              <!-- 0.001 рад/с ≈ 0.057°/с — хороший гироскоп -->
+              <bias_mean>0.0001</bias_mean>
+              <!-- Систематическая ошибка (дрейф) -->
+              <bias_stddev>0.00001</bias_stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.001</stddev>
+              <bias_mean>0.0001</bias_mean>
+              <bias_stddev>0.00001</bias_stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.001</stddev>
+              <bias_mean>0.0001</bias_mean>
+              <bias_stddev>0.00001</bias_stddev>
+            </noise>
+          </z>
+        </angular_velocity>
+
+        <!-- Шум акселерометра (линейное ускорение) -->
+        <linear_acceleration>
+          <x>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+              <!-- 0.01 м/с² ≈ 0.001g — хороший акселерометр -->
+              <bias_mean>0.001</bias_mean>
+              <bias_stddev>0.0001</bias_stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+              <bias_mean>0.001</bias_mean>
+              <bias_stddev>0.0001</bias_stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.01</stddev>
+              <bias_mean>0.001</bias_mean>
+              <bias_stddev>0.0001</bias_stddev>
+            </noise>
+          </z>
+        </linear_acceleration>
+      </imu>
+    </sensor>
+
+    <material>Gazebo/Green</material>
+  </gazebo>
+
+</robot>

@@ -1,0 +1,76 @@
+# ============================================================
+# Dockerfile.rviz — Визуализация RViz2
+# Отображение робота, сенсоров, карты, навигации
+# ============================================================
+
+FROM scout:base
+
+# --- Переменные для GUI через X11 ---
+# Эти переменные говорят RViz, куда выводить окно
+# DISPLAY передаётся при запуске контейнера через docker-compose,
+# а не при сборке образа. Здесь задаём пустое значение по умолчанию.
+ENV DISPLAY=:0
+
+ENV QT_X11_NO_MITSHM=1
+# Тема Qt (RViz написан на Qt)
+ENV QT_QPA_PLATFORM=xcb
+
+# --- Установка RViz2 и визуализационных плагинов ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-rviz2 \
+    ros-${ROS_DISTRO}-rviz-default-plugins \
+    ros-${ROS_DISTRO}-rviz-common \
+    ros-${ROS_DISTRO}-rviz-ogre-vendor \
+    ros-${ROS_DISTRO}-nav2-rviz-plugins \
+    ros-${ROS_DISTRO}-slam-toolbox \
+    ros-${ROS_DISTRO}-robot-state-publisher \
+    ros-${ROS_DISTRO}-xacro \
+    ros-${ROS_DISTRO}-joint-state-publisher \
+    ros-${ROS_DISTRO}-joint-state-publisher-gui \
+    ros-${ROS_DISTRO}-image-transport \
+    ros-${ROS_DISTRO}-image-transport-plugins \
+    ros-${ROS_DISTRO}-rqt-image-view \
+    ros-${ROS_DISTRO}-rqt-graph \
+    ros-${ROS_DISTRO}-rqt-tf-tree \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение пакетов:
+# rviz2                  — основной пакет RViz
+# rviz-default-plugins   — стандартные плагины (LaserScan, Map, TF, RobotModel...)
+# nav2-rviz-plugins      — плагины Nav2 для RViz (Nav2Goal, Costmap, Path...)
+#                          Позволяют кликать на карте для отправки целей навигации
+# image-transport        — эффективная передача изображений (сжатие)
+# rqt-image-view         — просмотр изображений с камеры в отдельном окне
+# rqt-graph              — визуализация графа нод и топиков (для отладки)
+# rqt-tf-tree            — визуализация TF-дерева (для отладки координат)
+
+# --- Установка OpenGL-библиотек для 3D-рендеринга ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    libegl-mesa0 \
+    libglu1-mesa \
+    mesa-utils \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
+    libxi6 \
+    libfontconfig1 \
+    libdbus-1-3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Копирование конфигурации RViz ---
+COPY ros2_ws/src/scout_bringup /ros2_ws/src/scout_bringup
+COPY ros2_ws/src/scout_description /ros2_ws/src/scout_description
+
+# --- Сборка ---
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && cd /ros2_ws \
+    && colcon build \
+        --packages-select scout_bringup scout_description \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    || echo "Сборка пропущена"
+
+# --- Команда по умолчанию: запуск RViz2 ---
+CMD ["rviz2"]

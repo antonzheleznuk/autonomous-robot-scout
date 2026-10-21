@@ -1,0 +1,33 @@
+# Release — автоматически создаёт GitHub Release из тега vX.Y.Z.
+# Ручное действие одно: ./scripts/release.sh (или git tag + push).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Сверка тега с файлом VERSION
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VER="$(cat VERSION)"
+          [ "$TAG" = "$VER" ] \
+            || { echo "Тег v$TAG != VERSION $VER"; exit 1; }
+
+      - name: Создание GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          # Все релизы проекта — полные (Latest): 0.x — этап разработки,
+          # сигнализируется номером SemVer, а не флагом Pre-release.
+          # Pre-release — для будущих бета-сборок (поставить true).
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

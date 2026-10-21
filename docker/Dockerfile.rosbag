@@ -1,0 +1,36 @@
+# ============================================================
+# Dockerfile.rosbag — Запись данных (rosbag)
+# Записывает все ключевые топики в формат MCAP
+# ============================================================
+
+FROM scout:base
+
+# --- Установка инструментов записи ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-rosbag2 \
+    ros-${ROS_DISTRO}-rosbag2-storage-mcap \
+    ros-${ROS_DISTRO}-rosbag2-transport \
+    ros-${ROS_DISTRO}-rosbag2-py \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение:
+# rosbag2                — основной пакет записи/чтения
+# rosbag2-storage-mcap   — плагин для формата MCAP
+# rosbag2-transport      — транспортный слой (подписка на топики)
+# rosbag2-py             — Python API для работы с bag-файлами
+
+# --- Создание директории для записей ---
+RUN mkdir -p /bags
+
+# --- Команда по умолчанию ---
+# Записывает все ключевые топики в файл /bags/scout_mission.mcap
+# Флаг -a записывает ВСЕ топики. В продакшене лучше указывать конкретные.
+# --storage mcap — используем формат MCAP
+# --compression-mode file — сжатие каждого файла отдельно
+# --compression-format zstd — алгоритм сжатия Zstandard (быстрый и эффективный)
+CMD ["ros2", "bag", "record", \
+     "-o", "/bags/scout_mission", \
+     "--storage", "mcap", \
+     "--compression-mode", "file", \
+     "--compression-format", "zstd", \
+     "-a"]

@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<!--
+  gz_plugins.xacro — Плагины Gazebo Harmonic для робота Scout Mini
+  Содержит: дифференциальный привод, публикация joint states
+  
+  Эти плагины "оживляют" робота в симуляторе:
+  - DiffDrive: принимает команды скорости (cmd_vel) и крутит колёса
+  - JointStatePublisher: публикует углы поворота колёс (для TF)
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ============================================================ -->
+  <!-- ПЛАГИН: ДИФФЕРЕНЦИАЛЬНЫЙ ПРИВОД                               -->
+  <!-- Управляет ведущими колёсами (передними).                       -->
+  <!-- Задние колёса — пассивные (свободно вращаются).               -->
+  <!-- ============================================================ -->
+  <gazebo>
+    <plugin
+      filename="gz-sim-diff-drive-system"
+      name="gz::sim::systems::DiffDrive">
+
+
+
+      <!-- Два ведущих колеса на центральной оси (эталонная
+           дифференциальная кинематика, разворот без скольжения) -->
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+
+
+
+
+
+
+
+      <!-- Геометрия привода -->
+      <wheel_separation>${wheel_separation}</wheel_separation>
+      <wheel_radius>${wheel_radius}</wheel_radius>
+
+      <!-- Ограничения скорости -->
+      <max_linear_acceleration>1.0</max_linear_acceleration>
+      <max_angular_acceleration>2.0</max_angular_acceleration>
+
+      <!-- Топики GZ Transport (будут маппиться на ROS 2 через ros_gz_bridge) -->
+      <topic>cmd_vel</topic>
+      <odom_topic>odom</odom_topic>
+      <tf_topic>tf</tf_topic>
+
+      <!-- Частота публикации одометрии -->
+      <odom_publish_frequency>50</odom_publish_frequency>
+
+      <!-- Фреймы одометрии (актуальные теги gz-sim DiffDrive;
+           legacy odom_frame/robot_base_frame из плана не читаются) -->
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_footprint</child_frame_id>
+
+      <!-- Публикация TF из плагина (отключаем, т.к. у нас EKF) -->
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>false</publish_odom_tf>
+      <publish_wheel_tf>false</publish_wheel_tf>
+
+    </plugin>
+  </gazebo>
+
+  <!-- ============================================================ -->
+  <!-- ПЛАГИН: ПУБЛИКАЦИЯ СОСТОЯНИЙ СОЧЛЕНЕНИЙ                       -->
+  <!-- Публикует углы поворота всех колёс для TF-дерева.             -->
+  <!-- Без этого robot_state_publisher не сможет вычислить           -->
+  <!-- позиции колёс относительно корпуса.                           -->
+  <!-- ============================================================ -->
+  <gazebo>
+    <plugin
+      filename="gz-sim-joint-state-publisher-system"
+      name="gz::sim::systems::JointStatePublisher">
+
+      <!-- Перечисляем все сочленения, которые нужно отслеживать -->
+
+      <joint_name>left_wheel_joint</joint_name>
+      <joint_name>right_wheel_joint</joint_name>
+
+
+      <!-- Частота публикации -->
+      <topic>joint_states</topic>
+      <update_rate>50</update_rate>
+
+    </plugin>
+  </gazebo>
+
+
+
+  <!-- ============================================================ -->
+  <!-- ЭТАЛОННАЯ ПОЗА (ground truth)                                 -->
+  <!-- Публикует истинную мировую позу модели прямо из физического   -->
+  <!-- движка (без колёсной одометрии, без шума). Прибор для         -->
+  <!-- измерения качества EKF/SLAM: оранжевые стрелки в RViz.        -->
+  <!-- ============================================================ -->
+  <gazebo>
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>world</odom_frame>
+      <robot_base_frame>base_footprint_gt</robot_base_frame>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
+  </gazebo>
+
+</robot>

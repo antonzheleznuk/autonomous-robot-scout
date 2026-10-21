@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>scout_bringup</name>
+  <version>0.1.0</version>
+  <description>Главные launch-файлы и конфигурации для Scout Mini</description>
+  <maintainer email="scout@dev.local">scout</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>scout_description</exec_depend>
+  <exec_depend>scout_gazebo</exec_depend>
+  <exec_depend>scout_navigation</exec_depend>
+  <exec_depend>scout_gps_waypoint</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

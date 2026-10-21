@@ -1,0 +1,77 @@
+# CI — валидация проекта на каждый push/PR в main.
+# Промышленный минимум: конфиги и код обязаны быть синтаксически
+# корректными ещё до сборки Docker-образов.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Установка PyYAML (в образе раннера отсутствует)
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: Валидация YAML (конфиги, rviz, compose, сам CI)
+        run: |
+          python3 - <<'EOF'
+          import yaml, glob, sys
+          files = (glob.glob('**/*.yaml', recursive=True)
+                   + glob.glob('**/*.yml', recursive=True)
+                   + glob.glob('**/*.rviz', recursive=True))
+          # docker/ исключён: Dockerfile.rviz — Dockerfile по содержимому,
+          # совпал с маской *.rviz, но не является YAML
+          files = [f for f in files
+                   if not f.startswith(('docs/artifacts/', 'bags/', 'docker/'))]
+          errors, passed = [], []
+          for f in files:
+              try:
+                  list(yaml.safe_load_all(open(f, encoding='utf-8')))
+                  passed.append(f)
+              except Exception as e:
+                  errors.append(f"{f}: {e}")
+          for f in passed:
+              print(f"YAML OK: {f}")
+          if errors:
+              print("\nОШИБКИ YAML:")
+              [print(" ", e) for e in errors]
+              sys.exit(1)
+          print(f"YAML: {len(passed)} файлов валидны")
+          EOF
+
+      - name: Валидация XML (xacro, sdf)
+        run: |
+          python3 - <<'EOF'
+          import xml.etree.ElementTree as ET, glob, sys
+          files = (glob.glob('**/*.xacro', recursive=True)
+                   + glob.glob('**/*.sdf', recursive=True))
+          errors = []
+          for f in files:
+              try:
+                  ET.parse(f)
+              except Exception as e:
+                  errors.append(f"{f}: {e}")
+          for f in files:
+              print(f"XML OK: {f}")
+          if errors:
+              print("\nОШИБКИ XML:")
+              [print(" ", e) for e in errors]
+              sys.exit(1)
+          print(f"XML: {len(files)} файлов валидны")
+          EOF
+
+      - name: Синтаксис bash-скриптов
+        run: |
+          for s in scripts/*.sh; do bash -n "$s" && echo "bash OK: $s"; done
+
+      - name: Файл VERSION — формат SemVer
+        run: |
+          grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION \
+            || { echo "VERSION не в формате X.Y.Z"; cat VERSION; exit 1; }
+          echo "VERSION OK: $(cat VERSION)"

@@ -1,0 +1,113 @@
+<?xml version="1.0"?>
+<!--
+  lidar.xacro — 2D LiDAR (аналог RPLiDAR A2 / Hokuyo UST-10LX)
+  
+  Расположение: верхняя часть корпуса, по центру.
+  Сканирует на 360° в горизонтальной плоскости.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Параметры LiDAR -->
+  <xacro:property name="lidar_radius" value="0.035"/>   <!-- Радиус корпуса LiDAR, м -->
+  <xacro:property name="lidar_height" value="0.04"/>    <!-- Высота корпуса LiDAR, м -->
+  <xacro:property name="lidar_mass" value="0.2"/>       <!-- Масса LiDAR, кг -->
+  <xacro:property name="lidar_z_offset" value="0.02"/>  <!-- Смещение вверх от крыши = половина высоты корпуса LiDAR (стоит заподлицо, плоскость скана в центре цилиндра) -->
+
+  <!-- ============================================================ -->
+  <!-- СОЧЛЕНЕНИЕ: крепление LiDAR к корпусу                         -->
+  <!-- ============================================================ -->
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <!-- LiDAR на крыше корпуса, по центру, чуть впереди -->
+    <origin xyz="0.1 0 ${chassis_height / 2 + lidar_z_offset}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============================================================ -->
+  <!-- ЗВЕНО: корпус LiDAR                                           -->
+  <!-- ============================================================ -->
+  <link name="lidar_link">
+    <visual>
+      <geometry>
+        <!-- LiDAR — маленький цилиндр на крыше -->
+        <cylinder radius="${lidar_radius}" length="${lidar_height}"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <cylinder radius="${lidar_radius}" length="${lidar_height}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="${lidar_mass}"/>
+      <inertia
+        ixx="${lidar_mass * (3 * lidar_radius * lidar_radius + lidar_height * lidar_height) / 12}"
+        ixy="0" ixz="0"
+        iyy="${lidar_mass * (3 * lidar_radius * lidar_radius + lidar_height * lidar_height) / 12}"
+        iyz="0"
+        izz="${lidar_mass * lidar_radius * lidar_radius / 2}"/>
+    </inertial>
+  </link>
+
+  <!-- ============================================================ -->
+  <!-- ПЛАГИН GAZEBO: GPU LiDAR                                      -->
+  <!-- Использует GPU для быстрого ray-casting (трассировки лучей).  -->
+  <!-- Рендерится движком Sensors-системы мира (ogre2, см. obstacle_course.sdf) -->
+  <!-- ============================================================ -->
+  <gazebo reference="lidar_link">
+    <sensor name="gpu_lidar" type="gpu_lidar">
+      <!-- Частота сканирования -->
+      <update_rate>10</update_rate>
+
+      <!-- Визуализация лучей в Gazebo (можно отключить для скорости) -->
+      <visualize>true</visualize>
+
+      <!-- Frame_id сообщений LiDAR без префикса имени модели (Harmonic) -->
+      <gz_frame_id>lidar_link</gz_frame_id>
+
+      <!-- Тема GZ Transport (маппится на /scan в ROS 2) -->
+      <topic>scan</topic>
+
+      <!-- Параметры сканирования -->
+      <lidar>
+        <scan>
+          <horizontal>
+            <samples>720</samples>
+            <!-- 720 лучей = 0.5° разрешение на 360° -->
+            <resolution>1</resolution>
+            <min_angle>-3.14159265</min_angle>
+            <!-- -π = -180° -->
+            <max_angle>3.14159265</max_angle>
+            <!-- +π = +180° (итого 360°) -->
+          </horizontal>
+        </scan>
+
+        <range>
+          <min>0.12</min>
+          <!-- Минимальная дальность 12 см (ближе — слепая зона) -->
+          <max>12.0</max>
+          <!-- Максимальная дальность 12 м -->
+          <resolution>0.01</resolution>
+          <!-- Точность измерения 1 см -->
+        </range>
+
+        <!-- Шум измерения (моделирует реальный LiDAR) -->
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>
+          <!-- Стандартное отклонение 1 см -->
+        </noise>
+      </lidar>
+    </sensor>
+
+    <!-- Цвет LiDAR в Gazebo -->
+    <material>Gazebo/Red</material>
+  </gazebo>
+
+</robot>

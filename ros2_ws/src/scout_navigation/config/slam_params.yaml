@@ -1,0 +1,115 @@
+# ============================================================
+# slam_params.yaml — Конфигурация SLAM Toolbox
+#
+# Режим: online_async (карта в реальном времени, не блокирует
+#        навигацию). Jazzy: нода lifecycle — запуск через
+#        LifecycleNode с автостартом configure→activate
+#        (см. slam.launch.py).
+#
+# Ключевая настройка стенда: ПЛОТНЫЕ коррекции map→odom
+# (минимальный пробег 0.1 м, интервал 0.3 с) + широкое окно
+# scan-matcher (1.0 м) — при аномалиях одометрии (упор в
+# препятствие, буксование) SLAM удерживает робота на карте,
+# компенсируя фантомный дрейф колёс.
+#
+# Документация: https://github.com/SteveMacenski/slam_toolbox
+# ============================================================
+
+slam_toolbox:
+  ros__parameters:
+
+    # --- Плагин решателя для оптимизации графа поз ---
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # --- Режим работы ---
+    # mapping — строим новую карту (наш режим);
+    # localization — навигация по готовой карте (будущие этапы)
+    mode: mapping
+
+    # --- Топики и фреймы ---
+    map_frame: map
+    # SLAM публикует TF map → odom
+
+    odom_frame: odom
+    # Берёт позицию из TF odom → base_footprint (публикует EKF)
+
+    base_frame: base_footprint
+    # Должен совпадать с base_link_frame в EKF!
+
+    scan_topic: /scan
+
+    use_sim_time: true
+    # Критично в симуляции! Без этого карта будет «размазана».
+
+    # --- Параметры карты ---
+    resolution: 0.05
+    # 5 см/пиксель — баланс детальности и скорости.
+
+    max_laser_range: 12.0
+    # Совпадает с range_max LiDAR.
+
+    # --- Плотность коррекций (НАША ГЛАВНАЯ ПРАВКА) ---
+    minimum_time_interval: 0.3
+    # Обрабатывать скан не чаще, чем раз в 0.3 с (при 10 Гц —
+    # каждый 3-й скан). Было 0.5 — коррекции приходили редко,
+    # и при фантомном дрейфе одометрии робот «уезжал с карты».
+
+    # Пороги добавления узла в граф (по пробегу/повороту):
+    # каждые 0.1 м или 0.2 рад (≈11°) — SLAM корректирует позу
+    # каждые 10 см пути, а не 50 см (дефолт 0.5 м).
+    minimum_travel_distance: 0.1
+    minimum_travel_heading: 0.2
+
+    transform_publish_period: 0.02
+    # Публикация TF map → odom с 50 Гц (≥ частоты EKF — плавность).
+
+    # --- Scan matching ---
+    do_loop_closing: true
+    # Для арены 20×20 м обязательно — робот часто проезжает
+    # мимо одних и тех же мест.
+
+    loop_search_maximum_distance: 3.0
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    correlation_search_space_dimension: 1.0
+    # Окно поиска совпадений: радиус 1.0 м от предсказанной позы
+    # (было 0.5). Широкое окно позволяет матчеру уверенно найти
+    # «робот стоит на месте» даже при фантомном дрейфе одометрии
+    # до 1 м между коррекциями.
+
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+    # «Размытие» поиска — помогает при неточной одометрии.
+
+    # --- Loop closure ---
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # --- Occupancy grid ---
+    map_update_interval: 5.0
+    # Обновлять карту каждые 5 секунд (визуальная частота;
+    # коррекции TF идут независимо, с 50 Гц).
+
+    occupied_thresh: 0.65
+    # Вероятность > 0.65 = «занято» (стена).
+
+    free_thresh: 0.196
+    # < 0.196 = «свободно»; между — «неизвестно» (серое).
+
+    # --- Отладка ---
+    debug_logging: false
+    throttle_scans: 1
+    # Обрабатывать каждый скан (отбор по времени — выше).
+
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    # 40 МБ стека — стандарт для SLAM.

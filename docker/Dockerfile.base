@@ -1,0 +1,124 @@
+# ============================================================
+# Dockerfile.base — Базовый образ для всех контейнеров проекта
+# Содержит: Ubuntu 24.04 + ROS 2 Jazzy + общие зависимости
+#
+# Сборка (обычно через scripts/build.sh, версия из VERSION):
+#   docker build --build-arg SCOUT_VERSION=$(cat VERSION) \
+#       -t scout:base -f docker/Dockerfile.base .
+# ============================================================
+
+FROM ubuntu:24.04
+
+# --- Версия проекта (OCI-метка образа) ---
+# Единственный источник истины — файл VERSION в корне репозитория;
+# сюда значение попадает через --build-arg (scripts/build.sh или
+# docker compose build-args). Одна декларация после FROM: зона
+# до FROM нужна только для параметризации самого FROM, которую
+# мы не используем (ubuntu:24.04 закреплён жёстко).
+# Метку наследуют все сервисные образы через FROM scout:base —
+# docker inspect показывает версию без запуска контейнера.
+ARG SCOUT_VERSION=dev
+LABEL org.opencontainers.image.version="${SCOUT_VERSION}" \
+      org.opencontainers.image.title="Scout Mini base" \
+      org.opencontainers.image.description="Базовый образ: Ubuntu 24.04 + ROS 2 Jazzy" \
+      org.opencontainers.image.source="https://github.com/antonzheleznuk/autonomous-robot-scout"
+
+# --- Предотвращение интерактивных запросов при установке ---
+# Без этой переменной apt будет спрашивать "вы уверены?" и "какой
+# часовой пояс?", что заблокирует автоматическую сборку образа.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Переменные окружения для ROS 2 ---
+# ROS_DISTRO — имя дистрибутива ROS 2 (используется в путях и скриптах)
+ENV ROS_DISTRO=jazzy
+# ROS_VERSION — версия ROS (2 для ROS 2)
+ENV ROS_VERSION=2
+# RMW_IMPLEMENTATION — middleware для обмена данными между нодами
+# Cyclone DDS — быстрый, надёжный, хорошо работает в Docker
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+# --- Настройка локали ---
+# Локаль определяет язык и кодировку системы.
+# Без правильной локали ROS 2 может выдавать ошибки с кириллицей
+# и некорректно обрабатывать Unicode-символы в топиках.
+RUN apt-get update && apt-get install -y locales \
+    && locale-gen ru_RU.UTF-8 \
+    && locale-gen en_US.UTF-8 \
+    && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV TZ=Europe/Moscow
+
+# --- Установка базовых утилит ---
+# Эти пакеты нужны практически в каждом контейнере
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    gnupg2 \
+    lsb-release \
+    ca-certificates \
+    software-properties-common \
+    build-essential \
+    cmake \
+    git \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение: --no-install-recommends — не устанавливать "рекомендуемые"
+# пакеты, которые не обязательны. Уменьшает размер образа.
+# rm -rf /var/lib/apt/lists/* — удаляем кэш apt, он не нужен в образе.
+
+# --- Добавление репозитория ROS 2 ---
+# GPG-ключ для проверки подлинности пакетов ROS 2
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+    -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+# Добавляем репозиторий ROS 2 для Ubuntu Noble
+RUN echo "deb [arch=$(dpkg --print-architecture) \
+    signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+    http://packages.ros.org/ros2/ubuntu noble main" \
+    > /etc/apt/sources.list.d/ros2.list
+
+# --- Установка ROS 2 Jazzy (базовый набор) ---
+# ros-jazzy-ros-base — минимальный набор ROS 2:
+# ядро, система сообщений, инструменты командной строки (ros2 cli)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-ros-base \
+    ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Создание ROS 2 workspace ---
+# Workspace — это "рабочая папка" ROS 2, где хранится исходный код
+# и скомпилированные пакеты. Стандартная структура:
+#   /ros2_ws/
+#     src/      — исходный код
+#     build/    — временные файлы сборки
+#     install/  — установленные пакеты
+#     log/      — логи сборки
+WORKDIR /ros2_ws
+RUN mkdir -p src
+
+# --- Скрипт инициализации ROS 2 ---
+# Этот скрипт будет выполняться при запуске каждого контейнера.
+# Он "подключает" ROS 2 — добавляет пути к библиотекам и утилитам
+# в переменные окружения. Без этого команды ros2 не будут работать.
+RUN echo '#!/bin/bash' > /ros_entrypoint.sh \
+    && echo 'set -e' >> /ros_entrypoint.sh \
+    && echo '# Подключаем ROS 2' >> /ros_entrypoint.sh \
+    && echo 'source /opt/ros/${ROS_DISTRO}/setup.bash' >> /ros_entrypoint.sh \
+    && echo '# Подключаем workspace (если собран)' >> /ros_entrypoint.sh \
+    && echo '[ -f /ros2_ws/install/setup.bash ] && source /ros2_ws/install/setup.bash' >> /ros_entrypoint.sh \
+    && echo '# Запускаем переданную команду' >> /ros_entrypoint.sh \
+    && echo 'exec "$@"' >> /ros_entrypoint.sh \
+    && chmod +x /ros_entrypoint.sh
+
+# ENTRYPOINT — скрипт, который запускается ПЕРЕД любой командой.
+# "$@" означает "все аргументы, переданные при запуске контейнера".
+ENTRYPOINT ["/ros_entrypoint.sh"]
+
+# CMD — команда по умолчанию (если при запуске не указана другая).
+# bash — просто открывает оболочку, контейнер будет ждать команд.
+CMD ["bash"]

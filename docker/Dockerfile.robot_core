@@ -1,0 +1,37 @@
+# ============================================================
+# Dockerfile.robot_core — Локализация и состояние робота
+# EKF + NavSat Transform + Robot State Publisher
+# ============================================================
+
+FROM scout:base
+
+# --- Установка пакетов локализации ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-robot-localization \
+    ros-${ROS_DISTRO}-robot-state-publisher \
+    ros-${ROS_DISTRO}-joint-state-publisher \
+    ros-${ROS_DISTRO}-xacro \
+    ros-${ROS_DISTRO}-tf2-ros \
+    ros-${ROS_DISTRO}-tf2-geometry-msgs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение пакетов:
+# robot-localization   — EKF/UKF фильтры + navsat_transform
+# tf2-ros              — библиотека работы с TF-трансформациями
+# tf2-geometry-msgs    — конвертация геометрии между фреймами
+
+# --- Копирование конфигураций ---
+COPY ros2_ws/src/scout_description /ros2_ws/src/scout_description
+COPY ros2_ws/src/scout_navigation /ros2_ws/src/scout_navigation
+
+# --- Сборка workspace ---
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && cd /ros2_ws \
+    && colcon build \
+        --packages-select scout_description scout_navigation \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    || echo "Сборка пропущена (пакеты ещё не полностью добавлены)"
+
+# --- Команда по умолчанию ---
+# Будет переопределена в docker-compose.yml
+CMD ["bash"]

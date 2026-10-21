@@ -1,0 +1,266 @@
+# ============================================================
+# docker-compose.yml — Scout Mini: полная система автономной навигации
+#
+# Запуск:    ./scripts/start.sh   (флаги: --no-rviz --no-rosbag --no-mission)
+#            (или docker compose up --build)
+# Остановка: Ctrl+C, затем ./scripts/stop.sh [--clean]
+#
+# Архитектура (7 микросервисов):
+#   [1] gz_sim       — Gazebo Harmonic + мост ros_gz + ground truth
+#   [2] robot_state  — EKF + NavSat Transform
+#   [3] slam         — SLAM Toolbox (lifecycle-автостарт)
+#   [4] navigation   — Nav2 (SmacPlanner2D + RegulatedPurePursuit)
+#   [5] gps_waypoint — GPS-миссия A→B (C++ ноды)
+#   [6] rviz         — RViz2 визуализация
+#   [7] rosbag       — Запись 17 топиков в MCAP+zstd
+#
+# Сеть: host (единая LAN, DDS auto-discovery, ROS_DOMAIN_ID=0).
+#
+# Версия проекта: SCOUT_VERSION (из окружения, экспорт start.sh)
+# в контейнеры (env) и в OCI-метку образа (build-args, Dockerfile.base).
+#
+# СТРУКТУРА ЯКОРЕЙ (реестр п.38): каждый ключ определяется РОВНО
+# в одном якоре. DISPLAY/X11 вынесены в общие якоря.
+# Сборка в контейнерах с --symlink-install (раздел 8).
+# ============================================================
+
+name: scout_mini
+
+# ======================== ШАБЛОНЫ ========================
+
+x-common: &common
+  network_mode: host
+  environment:
+    - ROS_DOMAIN_ID=0
+    - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    - ROS_DISTRO=jazzy
+    - RCUTILS_COLORIZED_OUTPUT=1
+    - SCOUT_VERSION=${SCOUT_VERSION:-dev}
+    # Версия проекта: баннер start.sh, логи mission_manager (п.45)
+  restart: "no"
+  # "no" = не перезапускать при падении: при отладке видно, что
+  # упало. В продакшене изменить на "unless-stopped".
+
+x-volumes: &volumes
+  volumes:
+    - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    - ./ros2_ws/src:/ros2_ws/src
+    - /dev/shm:/dev/shm
+
+# Build-args для всех сервисов: версия проекта в OCI-метку образа
+# (LABEL в Dockerfile.base; сервисные образы наследуют через FROM).
+x-build-args: &build_args
+  args:
+    SCOUT_VERSION: ${SCOUT_VERSION:-dev}
+
+services:
+
+  # ==========================================================
+  # 1. GAZEBO — Симулятор + спавн + мост + ground truth
+  # ==========================================================
+  gz_sim:
+    <<: [*common, *volumes]
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.gz_sim
+    image: scout:gz_sim
+    container_name: scout_gz_sim
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /ros2_ws &&
+        colcon build --symlink-install --packages-select scout_description scout_gazebo 2>/dev/null &&
+        source install/setup.bash &&
+        echo '=== [1/7] Запуск Gazebo Harmonic ===' &&
+        ros2 launch scout_gazebo gazebo.launch.py
+      "
+    # Healthcheck: ЯВНЫЙ bash (CMD-SHELL = sh/dash без 'source',
+    # реестр п.29). /scan публикуется => Gazebo + мост + робот живы.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "source /opt/ros/jazzy/setup.bash && ros2 topic list 2>/dev/null | grep -q /scan"]
+      interval: 10s
+      timeout: 15s
+      retries: 15
+      start_period: 45s
+
+  # ==========================================================
+  # 2. ROBOT STATE — EKF (20 Гц) + NavSat Transform
+  # ==========================================================
+  robot_state:
+    <<: [*common, *volumes]
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.robot_core
+    image: scout:robot_core
+    container_name: scout_robot_state
+    depends_on:
+      gz_sim:
+        condition: service_healthy
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /ros2_ws &&
+        colcon build --symlink-install --packages-select scout_navigation 2>/dev/null &&
+        source install/setup.bash &&
+        echo '=== [2/7] Запуск EKF + NavSat ===' &&
+        sleep 2 &&
+        ros2 launch scout_navigation localization.launch.py
+      "
+
+  # ==========================================================
+  # 3. SLAM — Построение карты
+  # ==========================================================
+  slam:
+    <<: [*common, *volumes]
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.slam
+    image: scout:slam
+    container_name: scout_slam
+    depends_on:
+      robot_state:
+        condition: service_started
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /ros2_ws &&
+        colcon build --symlink-install --packages-select scout_navigation 2>/dev/null &&
+        source install/setup.bash &&
+        echo '=== [3/7] Запуск SLAM Toolbox ===' &&
+        sleep 3 &&
+        ros2 launch scout_navigation slam.launch.py
+      "
+
+  # ==========================================================
+  # 4. NAVIGATION — Nav2 полный стек
+  # ==========================================================
+  navigation:
+    <<: [*common, *volumes]
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.navigation
+    image: scout:navigation
+    container_name: scout_navigation
+    depends_on:
+      slam:
+        condition: service_started
+    # Healthcheck: controller_server active => Nav2 готов вести
+    # робота (rosbag и gps_waypoint ждут именно этого)
+    healthcheck:
+      test: ["CMD", "bash", "-c", "source /opt/ros/jazzy/setup.bash && ros2 lifecycle get /controller_server 2>/dev/null | grep -q active"]
+      interval: 10s
+      timeout: 15s
+      retries: 24
+      start_period: 60s
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /ros2_ws &&
+        colcon build --symlink-install --packages-select scout_navigation 2>/dev/null &&
+        source install/setup.bash &&
+        echo '=== [4/7] Запуск Nav2 ===' &&
+        sleep 5 &&
+        ros2 launch scout_navigation navigation.launch.py
+      "
+
+  # ==========================================================
+  # 5. GPS WAYPOINT — Миссия A→B (C++ ноды, реестр п.36/40)
+  # ==========================================================
+  gps_waypoint:
+    <<: [*common, *volumes]
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.gps_waypoint
+    image: scout:gps_waypoint
+    container_name: scout_gps_waypoint
+    depends_on:
+      navigation:
+        condition: service_healthy
+      rviz:
+        condition: service_healthy
+    # Ждём healthcheck Nav2 И готовность RViz (healthcheck по
+    # процессу rviz2) — оператор видит миссию с первой секунды
+    # (п.40). Пауза 3 с — на DDS-discovery; готовность action-
+    # сервера дополнительно опрашивает сам mission_manager.
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /ros2_ws &&
+        colcon build --symlink-install --packages-select scout_gps_waypoint 2>/dev/null &&
+        source install/setup.bash &&
+        echo '=== [5/7] Ожидание готовности Nav2 и RViz ===' &&
+        sleep 3 &&
+        echo '=== [5/7] Запуск GPS-миссии A→B ===' &&
+        ros2 launch scout_gps_waypoint gps_mission.launch.py
+      "
+
+  # ==========================================================
+  # 6. RVIZ — Визуализация
+  # ==========================================================
+  rviz:
+    <<: [*common, *volumes]
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.rviz
+    image: scout:rviz
+    container_name: scout_rviz
+    depends_on:
+      gz_sim:
+        condition: service_healthy
+    # Готовность RViz = запущен процесс rviz2 (окно открывается
+    # следом). Mission Manager ждёт этот healthcheck (п.40).
+    healthcheck:
+      test: ["CMD", "bash", "-c", "grep -qx rviz2 /proc/[0-9]*/comm 2>/dev/null"]
+      interval: 5s
+      timeout: 15s
+      retries: 40
+      start_period: 60s
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /ros2_ws &&
+        colcon build --symlink-install 2>/dev/null &&
+        source install/setup.bash &&
+        echo '=== [6/7] Запуск RViz2 ===' &&
+        sleep 10 &&
+        rviz2 -d /ros2_ws/install/scout_bringup/share/scout_bringup/rviz/scout_nav.rviz
+      "
+    # colcon build БЕЗ --packages-select: scout_bringup зависит
+    # от scout_navigation и scout_gps_waypoint (реестр К6)
+
+  # ==========================================================
+  # 7. ROSBAG — Запись 17 топиков (самодостаточная запись:
+  # /robot_description и /joint_states дают полную модель робота
+  # при воспроизведении, п.33; /mission/status — статус миссии,
+  # раздел 8). Аргументы записи — ОДНОЙ строкой (п.28);
+  # --topics — флаг списка СРАЗУ ПЕРЕД ним (п.44: порядок
+  # "флаг перед -o" ронял рекордер, exit 2).
+  # ==========================================================
+  rosbag:
+    <<: *common
+    build:
+      <<: *build_args
+      context: .
+      dockerfile: docker/Dockerfile.rosbag
+    image: scout:rosbag
+    container_name: scout_rosbag
+    volumes:
+      - ./bags:/bags
+      - /dev/shm:/dev/shm
+    depends_on:
+      navigation:
+        condition: service_healthy
+    command: >
+      bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        echo '=== [7/7] Rosbag: ожидание нод ===' &&
+        sleep 5 &&
+        echo '=== Rosbag: начало записи ===' &&
+        ros2 bag record -o /bags/scout_nav_$$(date +%Y%m%d_%H%M%S) --storage mcap --compression-mode file --compression-format zstd --topics /scan /imu /navsat /odom /odometry/filtered /cmd_vel /joint_states /robot_description /map /tf /tf_static /plan /received_global_plan /goal_pose /mission/status /global_costmap/costmap /local_costmap/costmap
+      "

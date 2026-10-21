@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.8)
+project(scout_description)
+
+find_package(ament_cmake REQUIRED)
+
+# Установка URDF и конфигурационных файлов
+install(DIRECTORY urdf meshes launch config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+ament_package()

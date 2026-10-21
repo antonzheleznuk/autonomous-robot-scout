@@ -1,0 +1,108 @@
+<?xml version="1.0"?>
+<!--
+  gps.xacro — GPS-приёмник (аналог u-blox NEO-M8N)
+  
+  Расположение: верхняя точка робота (для лучшего «приёма спутников»).
+  Публикует: широту, долготу, высоту (sensor_msgs/NavSatFix).
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Параметры GPS -->
+  <xacro:property name="gps_radius" value="0.015"/>  <!-- Радиус антенны, м -->
+  <xacro:property name="gps_height" value="0.02"/>   <!-- Высота антенны, м -->
+  <xacro:property name="gps_mass" value="0.03"/>     <!-- Масса, кг -->
+
+  <!-- ============================================================ -->
+  <!-- СОЧЛЕНЕНИЕ: крепление GPS к корпусу                           -->
+  <!-- ============================================================ -->
+  <joint name="gps_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="gps_link"/>
+
+
+
+    <!-- GPS-антенна на крыше, чуть сзади. Опущена на 5 мм ниже плоскости
+         скана LiDAR (0.245 м), чтобы лидар не цепывал её вершину -->
+    <origin xyz="-0.15 0 ${chassis_height / 2 + 0.005}" rpy="0 0 0"/>
+
+
+  </joint>
+
+  <!-- ============================================================ -->
+  <!-- ЗВЕНО: GPS-антенна                                            -->
+  <!-- ============================================================ -->
+  <link name="gps_link">
+    <visual>
+      <geometry>
+        <cylinder radius="${gps_radius}" length="${gps_height}"/>
+      </geometry>
+      <material name="yellow">
+        <color rgba="0.9 0.9 0.1 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <cylinder radius="${gps_radius}" length="${gps_height}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="${gps_mass}"/>
+      <inertia
+        ixx="${gps_mass * (3 * gps_radius * gps_radius + gps_height * gps_height) / 12}"
+        ixy="0" ixz="0"
+        iyy="${gps_mass * (3 * gps_radius * gps_radius + gps_height * gps_height) / 12}"
+        iyz="0"
+        izz="${gps_mass * gps_radius * gps_radius / 2}"/>
+    </inertial>
+  </link>
+
+  <!-- ============================================================ -->
+  <!-- ПЛАГИН GAZEBO: NavSat (GPS)                                   -->
+  <!-- Конвертирует позицию робота в GPS-координаты.                  -->
+  <!-- Точность привязки зависит от spherical_coordinates в SDF-мире. -->
+  <!-- (датум — spherical_coordinates мира obstacle_course.sdf, -->
+  <!--   Москва; без неё координаты были бы ~0°) -->
+  <!-- ============================================================ -->
+  <gazebo reference="gps_link">
+    <sensor name="navsat_sensor" type="navsat">
+      <update_rate>5</update_rate>
+      <!-- 5 Гц — стандарт для u-blox NEO-M8N -->
+
+      <!-- Frame_id сообщений GPS без префикса имени модели -->
+      <gz_frame_id>gps_link</gz_frame_id>
+
+      <visualize>false</visualize>
+
+      <topic>navsat</topic>
+
+      <navsat>
+        <!-- Шум GPS-позиции -->
+        <position_sensing>
+          <horizontal>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>9.0e-6</stddev>
+              <!-- Горизонтальная точность ±1 м.
+                   ВАЖНО: gz-sim применяет горизонтальный шум NavSat
+                   в ГРАДУСАХ (Apply(Latitude().Degree()) в NavSatSensor.cc),
+                   а не в метрах. 9.0e-6 градуса = ~1 метр (1° широты = 111320 м).
+                   Вертикальный шум ниже — в метрах, как обычно. -->
+            </noise>
+          </horizontal>
+          <vertical>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>2.0</stddev>
+              <!-- Вертикальная точность ±2 м (GPS всегда хуже по высоте) -->
+            </noise>
+          </vertical>
+        </position_sensing>
+      </navsat>
+    </sensor>
+
+    <material>Gazebo/Yellow</material>
+  </gazebo>
+
+</robot>

@@ -1,0 +1,95 @@
+# ============================================================
+# Dockerfile.navigation — Полный навигационный стек Nav2
+# SmacPlanner2D + RegulatedPurePursuit + Costmap + Recovery + Waypoint Follower
+# ============================================================
+
+FROM scout:base
+
+# --- Установка Nav2 и всех компонентов ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-nav2-bringup \
+    ros-${ROS_DISTRO}-nav2-common \
+    ros-${ROS_DISTRO}-nav2-core \
+    ros-${ROS_DISTRO}-nav2-msgs \
+    ros-${ROS_DISTRO}-nav2-util \
+    ros-${ROS_DISTRO}-nav2-behavior-tree \
+    ros-${ROS_DISTRO}-nav2-bt-navigator \
+    ros-${ROS_DISTRO}-nav2-controller \
+    ros-${ROS_DISTRO}-nav2-planner \
+    ros-${ROS_DISTRO}-nav2-behaviors \
+    ros-${ROS_DISTRO}-nav2-smac-planner \
+    ros-${ROS_DISTRO}-nav2-dwb-controller \
+    ros-${ROS_DISTRO}-nav2-waypoint-follower \
+    ros-${ROS_DISTRO}-nav2-velocity-smoother \
+    ros-${ROS_DISTRO}-nav2-collision-monitor \
+    ros-${ROS_DISTRO}-nav2-lifecycle-manager \
+    ros-${ROS_DISTRO}-nav2-costmap-2d \
+    ros-${ROS_DISTRO}-nav2-map-server \
+    ros-${ROS_DISTRO}-nav2-amcl \
+    ros-${ROS_DISTRO}-behaviortree-cpp \
+    ros-${ROS_DISTRO}-angles \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение ключевых пакетов:
+#
+# nav2-bringup          — launch-файлы для запуска всего Nav2
+# nav2-smac-planner     — глобальный планировщик Smac (State Lattice A*)
+#                         Генерирует гладкие пути, учитывает кинематику робота.
+#                         Лучше NavFn, потому что:
+#                         1) Пути более плавные (меньше зигзагов)
+#                         2) Учитывает минимальный радиус поворота
+#                         3) Быстрее находит путь в узких проходах
+#
+# nav2-dwb-controller   — DWB (Dynamic Window): установлен, но НЕ используется
+#                         (рабочий контроллер — RegulatedPurePursuit в nav2-controller,
+#                         замена выполнена в разделе 6). Описание DWB: каждые 50 мс
+#                         генерирует сотни траекторий и выбирает лучшую.
+#
+# nav2-costmap-2d       — 2D-карта стоимости (costmap)
+#                         Представляет мир как сетку ячеек:
+#                         0 = свободно, 254 = препятствие, 255 = неизвестно.
+#                         Робот планирует путь по ячейкам с низкой стоимостью.
+#
+# nav2-behaviors        — поведения восстановления (spin, backup, wait)
+#                         Когда робот застрял, он пробует:
+#                         1) Повернуться на месте (spin)
+#                         2) Отъехать назад (backup)
+#                         3) Подождать (wait)
+#
+# nav2-waypoint-follower — следует по списку точек (waypoints)
+#                         Берёт точку из списка → отправляет в BT Navigator →
+#                         ждёт прибытия → берёт следующую точку.
+#
+# nav2-velocity-smoother — сглаживает резкие изменения скорости
+#                         Без него робот дёргался бы при каждом повороте.
+#
+# nav2-collision-monitor — экстренная остановка
+#                         Если препятствие ближе критического расстояния —
+#                         немедленно останавливает робота, игнорируя Nav2.
+#
+# nav2-amcl             — локализация по карте (Adaptive Monte Carlo)
+#                         На данном этапе не используется (у нас SLAM),
+#                         но устанавливаем для будущих этапов, когда
+#                         будем использовать заранее построенную карту.
+#
+# nav2-map-server       — загрузка/сохранение карт
+#                         Позволяет загрузить заранее построенную карту
+#                         вместо SLAM в реальном времени.
+#
+# behaviortree-cpp      — библиотека поведенческих деревьев
+#                         Nav2 использует BT для гибкого управления логикой:
+#                         "если путь найден → следуй; если застрял → восстановись"
+
+# --- Копирование конфигураций навигации ---
+COPY ros2_ws/src/scout_navigation /ros2_ws/src/scout_navigation
+
+# --- Сборка ---
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && cd /ros2_ws \
+    && colcon build \
+        --packages-select scout_navigation \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    || echo "Сборка пропущена"
+
+# --- Команда по умолчанию ---
+CMD ["bash"]

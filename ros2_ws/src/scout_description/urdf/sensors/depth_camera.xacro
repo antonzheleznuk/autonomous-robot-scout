@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<!--
+  depth_camera.xacro — Камера глубины RGB-D (аналог Orbbec Astra)
+  
+  Расположение: передняя панель корпуса, на высоте ~18 см.
+  Направлена вперёд, без наклона.
+  Выдаёт: RGB-изображение, карту глубины, облако точек.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Параметры камеры -->
+  <xacro:property name="camera_width" value="0.06"/>    <!-- Ширина камеры, м -->
+  <xacro:property name="camera_height" value="0.03"/>   <!-- Высота камеры, м -->
+  <xacro:property name="camera_depth" value="0.02"/>    <!-- Глубина камеры, м -->
+  <xacro:property name="camera_mass" value="0.15"/>     <!-- Масса камеры, кг -->
+
+  <!-- ============================================================ -->
+  <!-- СОЧЛЕНЕНИЕ: крепление камеры к корпусу                        -->
+  <!-- ============================================================ -->
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <!-- Камера на передней панели, по центру, на высоте 18 см от земли -->
+    <origin xyz="${chassis_length / 2} 0 0.055" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============================================================ -->
+  <!-- ЗВЕНО: корпус камеры                                          -->
+  <!-- ============================================================ -->
+  <link name="camera_link">
+    <visual>
+      <geometry>
+        <box size="${camera_depth} ${camera_width} ${camera_height}"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="${camera_depth} ${camera_width} ${camera_height}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="${camera_mass}"/>
+      <inertia
+        ixx="${camera_mass * (camera_height * camera_height + camera_depth * camera_depth) / 12}"
+        ixy="0" ixz="0"
+        iyy="${camera_mass * (camera_width * camera_width + camera_depth * camera_depth) / 12}"
+        iyz="0"
+        izz="${camera_mass * (camera_width * camera_width + camera_height * camera_height) / 12}"/>
+    </inertial>
+  </link>
+
+  <!-- ============================================================ -->
+  <!-- ОПТИЧЕСКИЙ ФРЕЙМ КАМЕРЫ                                       -->
+  <!-- В ROS принято, что оптическая ось камеры направлена по Z,     -->
+  <!-- X — вправо, Y — вниз. Это отличается от стандартного ROS       -->
+  <!-- (X-вперёд, Y-влево, Z-вверх). Нужен отдельный фрейм.           -->
+  <!-- ============================================================ -->
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_depth_optical_link"/>
+    <!-- Поворот из ROS-фрейма в оптический фрейм камеры -->
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+  </joint>
+
+  <link name="camera_depth_optical_link"/>
+
+  <!-- ============================================================ -->
+  <!-- ПЛАГИН GAZEBO: RGB-D камера                                   -->
+  <!-- Генерирует RGB-изображение + карту глубины + облако точек.    -->
+  <!-- ============================================================ -->
+  <gazebo reference="camera_link">
+    <sensor name="rgbd_camera" type="rgbd_camera">
+      <update_rate>10</update_rate>
+      <!-- 10 Гц (снижено с 15 для CPU/RTF, раздел 3) -->
+
+
+
+      <!-- Телесный фрейм камеры (X-вперёд): облако точек Gazebo идёт
+           в телесной конвенции на обоих движках (проверено эмпирически:
+           оптическая метка разворачивала веер на 90° вертикально).
+           Оптический фрейм останется для image-pipeline в Этапе 2. -->
+      <gz_frame_id>camera_link</gz_frame_id>
+
+
+
+      <visualize>true</visualize>
+
+      <!-- Тема GZ Transport -->
+      <topic>depth_camera</topic>
+
+      <camera>
+        <!-- Горизонтальное поле зрения -->
+        <horizontal_fov>1.047</horizontal_fov>
+        <!-- 60° = 1.047 рад -->
+
+        <image>
+          <width>320</width>
+          <height>240</height>
+          <format>R8G8B8</format>
+        </image>
+
+        <!-- Параметры «объектива» -->
+        <clip>
+          <near>0.4</near>
+          <!-- Минимальная дистанция 40 см (ближе — не видит, как реальная Astra) -->
+          <far>8.0</far>
+          <!-- Максимальная дистанция 8 м -->
+        </clip>
+
+        <!-- Шум глубины -->
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.005</stddev>
+          <!-- Шум глубины 5 мм — реалистично для Astra на расстоянии 1-2 м -->
+        </noise>
+      </camera>
+    </sensor>
+
+    <material>Gazebo/Black</material>
+  </gazebo>
+
+</robot>

@@ -1,0 +1,170 @@
+<?xml version="1.0"?>
+<!--
+  base.xacro — Шасси Scout Mini: дифференциальная платформа
+  "эталонного стенда" для отладки алгоритмов.
+
+  Концепция (аналог TurtleBot / роботов-пылесосов):
+  - 2 ВЕДУЩИХ колеса на центральной оси (x=0): чистое качение,
+    разворот на месте без бокового скольжения ведущих колёс
+  - 2 сферических катка (спереди/сзади по центру), трение ~0:
+    свободно скользят в любом направлении
+  → точная дифференциальная кинематика: одометрия = истина,
+    Gazebo и RViz синхронны.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ============================================================ -->
+  <!-- МАКРОС: ведущее колесо                                        -->
+  <!-- ============================================================ -->
+  <xacro:macro name="drive_wheel" params="prefix y_offset">
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_wheel"/>
+      <!-- центр колеса на высоте wheel_radius над землёй -->
+      <origin xyz="0 ${y_offset} ${wheel_radius - chassis_z_offset}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <dynamics damping="0.1" friction="0.1"/>
+    </joint>
+
+    <link name="${prefix}_wheel">
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.3 0.3 0.3 1.0"/>
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <mass value="${wheel_mass}"/>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <inertia
+          ixx="${wheel_mass * (3 * wheel_radius * wheel_radius + wheel_width * wheel_width) / 12}"
+          ixy="0" ixz="0"
+          iyy="${wheel_mass * (3 * wheel_radius * wheel_radius + wheel_width * wheel_width) / 12}"
+          iyz="0"
+          izz="${wheel_mass * wheel_radius * wheel_radius / 2}"/>
+      </inertial>
+    </link>
+
+    <gazebo reference="${prefix}_wheel">
+      <mu1>1.0</mu1>
+      <mu2>1.0</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <material>Gazebo/DarkGrey</material>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================================================ -->
+  <!-- МАКРОС: сферический опорный каток (трение ~0)                 -->
+  <!-- ============================================================ -->
+  <xacro:macro name="caster_ball" params="prefix x_offset">
+    <link name="${prefix}_caster">
+      <visual>
+        <geometry>
+          <sphere radius="${caster_radius}"/>
+        </geometry>
+        <material name="light_grey">
+          <color rgba="0.7 0.7 0.7 1.0"/>
+        </material>
+      </visual>
+
+      <collision>
+        <geometry>
+          <sphere radius="${caster_radius}"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <mass value="${caster_mass}"/>
+        <inertia
+          ixx="${2 * caster_mass * caster_radius * caster_radius / 5}"
+          ixy="0" ixz="0"
+          iyy="${2 * caster_mass * caster_radius * caster_radius / 5}"
+          iyz="0"
+          izz="${2 * caster_mass * caster_radius * caster_radius / 5}"/>
+      </inertial>
+    </link>
+
+    <!-- fixed-сустав: сфера не вращается — она СКОЛЬЗИТ с нулевым
+         трением, работая как омнисферический каток -->
+    <joint name="${prefix}_caster_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${prefix}_caster"/>
+      <origin xyz="${x_offset} 0 ${caster_radius - chassis_z_offset}" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="${prefix}_caster">
+      <mu1>0.0</mu1>
+      <mu2>0.0</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <material>Gazebo/Grey</material>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================================================ -->
+  <!-- BASE_FOOTPRINT — проекция робота на землю                     -->
+  <!-- ============================================================ -->
+  <link name="base_footprint"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${chassis_z_offset}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ============================================================ -->
+  <!-- BASE_LINK — корпус                                            -->
+  <!-- ============================================================ -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.2 0.4 0.8 1.0"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="${chassis_mass}"/>
+      <inertia
+        ixx="${chassis_mass * (chassis_height * chassis_height + chassis_width * chassis_width) / 12}"
+        ixy="0" ixz="0"
+        iyy="${chassis_mass * (chassis_length * chassis_length + chassis_height * chassis_height) / 12}"
+        iyz="0"
+        izz="${chassis_mass * (chassis_length * chassis_length + chassis_width * chassis_width) / 12}"/>
+    </inertial>
+  </link>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+  <!-- ============================================================ -->
+  <!-- СБОРКА: 2 ведущих колеса на центральной оси + 2 катка         -->
+  <!-- ============================================================ -->
+  <xacro:drive_wheel prefix="left"  y_offset="${wheel_separation / 2}"/>
+  <xacro:drive_wheel prefix="right" y_offset="${-wheel_separation / 2}"/>
+
+  <xacro:caster_ball prefix="front" x_offset="${caster_x_offset}"/>
+  <xacro:caster_ball prefix="rear"  x_offset="${-caster_x_offset}"/>
+
+</robot>

@@ -1,0 +1,104 @@
+# ============================================================
+# Dockerfile.gz_sim — Симулятор Gazebo Harmonic + ros_gz_bridge
+# Наследуется от scout:base (ROS 2 Jazzy уже установлен)
+# ============================================================
+
+FROM scout:base
+
+# --- Переменные окружения для Gazebo ---
+# GZ_VERSION — версия Gazebo (Harmonic = 8-я версия GZ Sim)
+ENV GZ_VERSION=harmonic
+# GZ_SIM_SYSTEM_PLUGIN_PATH — путь к плагинам Gazebo
+ENV GZ_SIM_SYSTEM_PLUGIN_PATH=/opt/ros/${ROS_DISTRO}/lib
+# Отображение GUI через X11 хоста
+
+# DISPLAY передаётся при запуске контейнера через docker-compose,
+# а не при сборке образа. Здесь задаём пустое значение по умолчанию.
+ENV DISPLAY=:0
+
+ENV QT_X11_NO_MITSHM=1
+# Переменная для корректной работы OpenGL в контейнере
+ENV LIBGL_ALWAYS_SOFTWARE=0
+
+# --- Добавление репозитория Gazebo Harmonic ---
+# Gazebo распространяется через репозиторий OSRF (Open Source
+# Robotics Foundation) — организации, которая разрабатывает Gazebo.
+RUN curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
+    -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) \
+    signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] \
+    http://packages.osrfoundation.org/gazebo/ubuntu-stable noble main" \
+    > /etc/apt/sources.list.d/gazebo-stable.list
+
+# --- Установка Gazebo Harmonic и ros_gz ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gz-harmonic \
+    ros-${ROS_DISTRO}-ros-gz \
+    ros-${ROS_DISTRO}-ros-gz-bridge \
+    ros-${ROS_DISTRO}-ros-gz-sim \
+    ros-${ROS_DISTRO}-ros-gz-image \
+    ros-${ROS_DISTRO}-xacro \
+    ros-${ROS_DISTRO}-robot-state-publisher \
+    ros-${ROS_DISTRO}-joint-state-publisher \
+    ros-${ROS_DISTRO}-joint-state-publisher-gui \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение пакетов:
+# gz-harmonic          — полный Gazebo Harmonic (сервер + GUI + плагины)
+# ros-gz               — метапакет, включает все компоненты ros_gz
+# ros-gz-bridge        — мост GZ Transport ↔ ROS 2 топики
+# ros-gz-sim           — запуск Gazebo из ROS 2 launch-файлов
+# ros-gz-image         — мост для изображений (камера)
+# xacro                — макро-язык для URDF (упрощает описание робота)
+# robot-state-publisher — публикует TF из URDF
+# joint-state-publisher — публикует состояния сочленений
+
+# --- Установка дополнительных зависимостей для GPU/OpenGL ---
+# Эти пакеты нужны для аппаратного 3D-ускорения в Gazebo.
+# В VMware они работают через виртуальный GPU (SVGA 3D).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    libegl-mesa0 \
+    libglu1-mesa \
+    mesa-utils \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
+    libxi6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Создание директорий для Gazebo ---
+RUN mkdir -p /ros2_ws/src \
+    && mkdir -p /gazebo_models \
+    && mkdir -p /gazebo_worlds
+
+# --- Переменная для путей к моделям Gazebo ---
+# Gazebo ищет модели в этих директориях при загрузке мира
+ENV GZ_SIM_RESOURCE_PATH=/gazebo_models:/gazebo_worlds:/ros2_ws/install/scout_description/share:/ros2_ws/install/scout_gazebo/share
+
+# --- Копирование исходников модели и мира ---
+# (при старте контейнера пересобираются из примонтированного src)
+COPY ros2_ws/src/scout_description /ros2_ws/src/scout_description
+COPY ros2_ws/src/scout_gazebo /ros2_ws/src/scout_gazebo
+
+# --- Сборка ROS 2 workspace ---
+# colcon — инструмент сборки ROS 2 (аналог catkin_make в ROS 1).
+# --packages-select — собираем только указанные пакеты.
+# --cmake-args -DCMAKE_BUILD_TYPE=Release — оптимизированная сборка.
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && cd /ros2_ws \
+    && colcon build \
+        --packages-select scout_description scout_gazebo \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    || echo "Сборка пропущена (пакеты ещё не добавлены)"
+
+# Пояснение: "|| echo ..." — если сборка не удалась (потому что
+# пакеты пусты на данном этапе), не прерываем сборку Docker-образа.
+# Позже, когда код будет добавлен, пересоберём.
+
+# --- Команда запуска по умолчанию ---
+# Запускает Gazebo с пустым миром (для теста).
+# В реальном запуске будет переопределена в docker-compose.yml.
+CMD ["gz", "sim", "-r", "-v", "4"]

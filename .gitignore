@@ -1,0 +1,56 @@
+# === ROS 2 workspace ===
+# Скомпилированные файлы (пересобираются из исходников)
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# === Docker ===
+# Временные файлы Docker
+docker/.dockerignore
+
+# === Rosbag записи ===
+# Слишком большие для GitHub (лимит 100 МБ на файл)
+bags/
+*.mcap
+*.db3
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+*.egg
+.eggs/
+*.whl
+.venv/
+venv/
+env/
+
+# === C++ ===
+# Скомпилированные объекты
+*.o
+*.so
+*.a
+*.out
+
+# === IDE и редакторы ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+
+# === Системные файлы ===
+.DS_Store
+Thumbs.db
+*.log
+
+# === Gazebo ===
+# Кэш моделей Gazebo
+.gazebo/
+
+# === Документация ===
+# Сгенерированные файлы документации
+docs/_build/

@@ -1,0 +1,31 @@
+# ============================================================
+# Dockerfile.slam — SLAM (одновременная локализация и картография)
+# Использует slam_toolbox в режиме online_async
+# ============================================================
+
+FROM scout:base
+
+# --- Установка slam_toolbox ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-${ROS_DISTRO}-slam-toolbox \
+    && rm -rf /var/lib/apt/lists/*
+
+# Пояснение:
+# slam_toolbox — современный SLAM-пакет для ROS 2.
+# Заменяет устаревшие cartographer и slam_karto.
+# Режим online_async — строит карту в реальном времени,
+# асинхронно обрабатывая сканы лидара. Не блокирует
+# основной поток навигации.
+
+# --- Копирование конфигураций SLAM ---
+COPY ros2_ws/src/scout_navigation /ros2_ws/src/scout_navigation
+
+# --- Сборка ---
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && cd /ros2_ws \
+    && colcon build \
+        --packages-select scout_navigation \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    || echo "Сборка пропущена"
+
+CMD ["bash"]
